@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: 'infrastructure'
+    file_sd_configs:
+      - files: ['infrastructure-targets.json']
+    
+  - job_name: 'jenkins'
+    file_sd_configs:
+      - files: ['jenkins-targets.json']
+
+  - job_name: 'hypervisor'
+    file_sd_configs:
+      - files: ['hypervisor-targets.json']
+
+rule_files:
+  - alert.rules.yml
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - 'prometheus-target.hostname.com:9093'

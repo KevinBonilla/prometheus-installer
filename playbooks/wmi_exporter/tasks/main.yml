@@ -1,0 +1,116 @@
+---
+      #########################################################################
+      # Install wmi_exporter for Prometheus Monitoring                        #
+      # Installs based on arch and OS                                         #
+      # https://github.com/KevinBonilla/prometheus-installer                  #
+      #########################################################################
+
+- name: Set fact for winRM 
+  set_fact:
+    ansible_connection: winrm
+    ansible_port: 5986
+    ansible_winrm_server_cert_validation: ignore
+    prometheus_address: "{{ lookup('file', '{{ prometheus_address }}') }}"
+    prometheus_password: "{{ lookup('file', '{{ prometheus_password }}') }}"
+  tags: wmi_exporter
+
+- name: Check if a wmi_exporter is installed by checking if service is installed
+  win_service:
+    name: wmi_exporter
+  register: wmi_installed
+  when: 
+    - ansible_facts['os_family'] == "Windows"
+  tags: wmi_exporter
+
+- name: Download wmi exporter when OS = Windows
+  win_get_url:
+    url: https://github.com/martinlindhe/wmi_exporter/releases/download/v0.10.2/wmi_exporter-0.10.2-amd64.msi
+    dest: 'C:\Users\Administrator\Downloads\wmi_exporter.msi'
+    force: no
+  when: 
+    - ansible_facts['os_family'] == "Windows"
+    - wmi_installed.exists == False 
+  tags: wmi_exporter
+
+- name: Install wmi exporter when OS = Windows
+  win_shell: msiexec /i wmi_exporter.msi
+  args:
+    chdir: C:\Users\Administrator\Downloads
+  when: 
+    - ansible_facts['os_family'] == "Windows"
+    - wmi_installed.exists == False 
+  tags: wmi_exporter
+
+- name: Cleanup wmi exporter
+  win_file:
+    path: 'C:\Users\Administrator\Downloads\{{ item }}'
+    state: absent
+  with_items:
+    - wmi_exporter.msi
+  when: 
+    - ansible_facts['os_family'] == "Windows"
+    - wmi_installed.exists == False 
+  tags: wmi_exporter
+
+- name: Change ansible connection to ssh and define port to 22
+  set_fact:
+    ansible_connection: ssh
+    ansible_port: 22
+  tags: wmi_exporter
+
+- name: Touch /tmp/tmp.json on rt-awx host
+  file:
+    path: /tmp/tmp.json
+    state: touch
+    mode: u=rw,g=r,o=r
+  delegate_to: localhost
+  run_once: true
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+
+- name: Clean local targets.json on rt-awx host
+  file:
+    path: /tmp/{{ prometheus_targets }}-targets.json
+    state: absent
+  ignore_errors: yes
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+
+- name: scp prometheus targets json to local
+  shell: "sshpass -p {{ prometheus_password }} scp {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json /tmp/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+
+- name: scp prometheus tmp targets json to local
+  shell: "sshpass -p {{ prometheus_password }} scp /tmp/tmp.json {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+
+- name: Add hostname to targets.json
+  shell: jq '.[].targets |= . + ["{{ inventory_hostname }}:9182"]' /tmp/{{ prometheus_targets }}-targets.json > /tmp/tmp.json && mv /tmp/tmp.json /tmp/{{ prometheus_targets }}-targets.json
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False 
+  tags: wmi_exporter
+
+- name: scp prometheus targets to local
+  shell: "sshpass -p {{ prometheus_password }} scp /tmp/{{ prometheus_targets }}-targets.json {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+
+- name: Restart prom config to load hosts
+  shell: "sshpass -p {{ prometheus_password }} ssh {{ prometheus_address }} 'killall -HUP prometheus'"
+  delegate_to: localhost
+  when:
+    - wmi_installed.exists == False
+  tags: wmi_exporter
+  run_once: true

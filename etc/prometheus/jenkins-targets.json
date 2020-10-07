@@ -1,0 +1,19 @@
+[
+  {
+    "targets": [
+      "windows.hostname.com:9182"
+    ],
+    "labels": {
+      "job": "jenkins"
+    }
+  },
+  {
+    "targets": [
+      "linux.hostname.com:9100"
+    ],
+    "labels": {
+      "job": "jenkins"
+    }
+  },
+]
+

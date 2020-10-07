@@ -1,0 +1,170 @@
+---
+      #########################################################################
+      # Install node exporter for Prometheus Monitoring                       #
+      # Installs based on arch and OS                                         #
+      # https://github.com/KevinBonilla/prometheus-installer                  #
+      #########################################################################
+
+- name: Set fact for environment variables
+  set_fact:
+    prometheus_password: "{{ lookup('file', '{{ prometheus_password }}') }}"
+    prometheus_address: "{{ lookup('file', '{{ prometheus_address }}') }}"
+  tags: node_exporter
+
+- name: Check if node_exporter is installed
+  stat:
+    path: /usr/local/bin/node_exporter
+  register: node_exporter_check
+  tags: node_exporter
+
+- name: Transfer of scripts install scripts to target host
+  unarchive:
+    src: /Vendor_Files/prometheus/install-scripts.tar.gz
+    dest: /tmp 
+  when: 
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for RHEL6, CENTOS6 x86 (sysvinit)
+  command: ./node_exporter_x86_sysvinit.sh
+  args:
+    chdir: /tmp/install-scripts
+  when: 
+    - ansible_distribution == "RedHat" or ansible_distribution == "CentOS"
+    - ansible_distribution_major_version == "6" and ansible_architecture == "x86_64"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for Rhel7, Ub16/18, SLES12 x86 (systemd)
+  command: ./node_exporter_x86_systemctl.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when:
+    - ((ansible_distribution == "RedHat" or ansible_distribution == "CentOS") and ansible_distribution_major_version == "7") or
+      (ansible_distribution == "Ubuntu" and (ansible_distribution_major_version == "16" or ansible_distribution_major_version == "18")) or
+      (ansible_distribution == "SLES" and ansible_distribution_major_version == "12")
+    - ansible_architecture == "x86_64"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for Rhel7 ppc64 (systemd)
+  command: ./node_exporter_ppc64_systemctl.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when: 
+    - ansible_distribution == "RedHat"  
+    - ansible_distribution_major_version == "7"
+    - ansible_architecture == "ppc64"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for Rhel6 ppc64 (sysvinit)
+  command: ./node_exporter_ppc64_sysvinit.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when: 
+    - ansible_distribution == "RedHat" 
+    - ansible_distribution_major_version == "6"
+    - ansible_architecture == "ppc64"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for UB16/18 RHEL7 ppc64le (systemd)
+  command: ./node_exporter_ppc64le_systemctl.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when: 
+    - (ansible_distribution == "Ubuntu" and (ansible_distribution_major_version == "16" or ansible_distribution_major_version == "18")) or
+      (ansible_distribution == "RedHat" and (ansible_distribution_major_version == "7" or ansible_distribution_major_version == "8"))
+    - ansible_architecture == "ppc64le"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for UB16 SLES12 and RH7 s390x (systemd)
+  command: ./node_exporter_s390x_systemctl.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when:
+    - (ansible_distribution == "Ubuntu" and ansible_distribution_major_version == "16") or
+      (ansible_distribution == "SLES" and ansible_distribution_major_version == "12") or
+      (ansible_distribution == "RHEL" and ansible_distribution_major_version == "7")
+    - ansible_architecture == "s390x"
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Run install script for OSX debian amd64
+  command: ./node_exporter_darwin_amd64.sh
+  args:
+    chdir: /tmp/install-scripts/
+  when: 
+    - (ansible_facts['os_family'] == "Darwin" and
+      ansible_architecture == "x86_64")
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter
+
+- name: Clean up install-scripts folder
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+    - /tmp/install-scripts/
+  tags: node_exporter
+
+- name: Touch /tmp/tmp.json on rt-awx host
+  file:
+    path: /tmp/tmp.json
+    state: touch
+    mode: u=rw,g=r,o=r
+  delegate_to: localhost
+  run_once: true
+  when:
+    - node_exporter_check.stat.exists == False
+  tags: node_exporter_jq
+
+- name: Clean local targets.json on rt-awx host
+  file:
+    path: /tmp/{{ prometheus_targets }}-targets.json
+    state: absent
+  ignore_errors: yes
+  delegate_to: localhost
+  when:
+    - node_exporter_check.stat.exists == False
+  tags: node_exporter_jq
+
+- name: scp prometheus targets to local
+  shell: "sshpass -p {{ prometheus_password }} scp {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json /tmp/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter_jq
+
+- name: scp prometheus targets to local
+  shell: "sshpass -p {{ prometheus_password }} scp /tmp/tmp.json {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter_jq
+
+- name: Add hostname to targets.json
+  shell: jq '.[].targets |= . + ["{{ inventory_hostname }}:9100"]' /tmp/{{ prometheus_targets }}-targets.json > /tmp/tmp.json && mv /tmp/tmp.json /tmp/{{ prometheus_targets }}-targets.json
+  delegate_to: localhost
+  when:
+    - (ansible_distribution == "Ubuntu" or ansible_distribution == "RedHat" or ansible_distribution == "CentOS" or ansible_distribution == "SLES")
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter_jq
+
+- name: scp prometheus targets to local
+  shell: "sshpass -p {{ prometheus_password }} scp /tmp/{{ prometheus_targets }}-targets.json {{ prometheus_address }}:/etc/prometheus/{{ prometheus_targets }}-targets.json"
+  delegate_to: localhost
+  when:
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter_jq
+
+- name: Restart prom config to load hosts
+  shell: "sshpass -p {{ prometheus_password }} ssh {{ prometheus_address }} 'killall -HUP prometheus'"
+  delegate_to: localhost
+  run_once: true
+  when:
+    - node_exporter_check.stat.exists == False 
+  tags: node_exporter_jq
+
