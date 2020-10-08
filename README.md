@@ -20,5 +20,5 @@ Features on this repo include:
 			- Windows
 			- UB16/18
 ```
-- Ansible playbook grabs each bash script based on OS/Arch, for example a RHEL6 x86 vm will run the `node_exporter_x86_systemctl.sh` script
+- Ansible playbook grabs each bash script based on OS/Arch, for example a RHEL6 x86 vm will run the `node_exporter_x86_sysvinit.sh` script
 
